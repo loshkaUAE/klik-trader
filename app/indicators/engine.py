@@ -1,75 +1,54 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
-import ta
 
 
 class IndicatorEngine:
-    """Calculates 30+ deterministic indicators on candle close only."""
+    def calculate(self, candles: pd.DataFrame) -> pd.DataFrame:
+        df = candles.copy()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
-    def calculate(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = df.copy()
-        high, low, close, volume = out["high"], out["low"], out["close"], out["volume"]
+        df["ema_21"] = df["close"].ewm(span=21, adjust=False).mean()
+        df["ema_200"] = df["close"].ewm(span=200, adjust=False).mean()
 
-        # Trend
-        out["sma_20"] = ta.trend.sma_indicator(close, 20)
-        out["sma_50"] = ta.trend.sma_indicator(close, 50)
-        out["ema_9"] = ta.trend.ema_indicator(close, 9)
-        out["ema_21"] = ta.trend.ema_indicator(close, 21)
-        out["ema_200"] = ta.trend.ema_indicator(close, 200)
-        out["adx"] = ta.trend.adx(high, low, close, 14)
-        out["adx_pos"] = ta.trend.adx_pos(high, low, close, 14)
-        out["adx_neg"] = ta.trend.adx_neg(high, low, close, 14)
-        out["ichimoku_a"] = ta.trend.ichimoku_a(high, low)
-        out["ichimoku_b"] = ta.trend.ichimoku_b(high, low)
-        out["macd"] = ta.trend.macd(close)
-        out["macd_signal"] = ta.trend.macd_signal(close)
-        out["macd_hist"] = out["macd"] - out["macd_signal"]
+        diff = df["close"].diff()
+        gain = diff.clip(lower=0).rolling(14).mean()
+        loss = (-diff.clip(upper=0)).rolling(14).mean()
+        rs = gain / loss.replace(0, 1e-9)
+        df["rsi"] = 100 - (100 / (1 + rs))
 
-        # Momentum
-        out["rsi"] = ta.momentum.rsi(close, 14)
-        out["stoch_k"] = ta.momentum.stoch(high, low, close)
-        out["stoch_d"] = ta.momentum.stoch_signal(high, low, close)
-        out["cci"] = ta.trend.cci(high, low, close, 20)
-        out["williams_r"] = ta.momentum.williams_r(high, low, close, 14)
-        out["roc"] = ta.momentum.roc(close, 12)
+        tr = pd.concat(
+            [
+                (df["high"] - df["low"]),
+                (df["high"] - df["close"].shift()).abs(),
+                (df["low"] - df["close"].shift()).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        df["atr"] = tr.rolling(14).mean().bfill()
 
-        # Volatility
-        out["atr"] = ta.volatility.average_true_range(high, low, close, 14)
-        out["bb_mid"] = ta.volatility.bollinger_mavg(close)
-        out["bb_high"] = ta.volatility.bollinger_hband(close)
-        out["bb_low"] = ta.volatility.bollinger_lband(close)
-        out["bb_width"] = (out["bb_high"] - out["bb_low"]) / out["bb_mid"].replace(0, np.nan)
-        out["kc_mid"] = ta.volatility.keltner_channel_mband(high, low, close)
-        out["kc_high"] = ta.volatility.keltner_channel_hband(high, low, close)
-        out["kc_low"] = ta.volatility.keltner_channel_lband(high, low, close)
-        out["donchian_high"] = ta.volatility.donchian_channel_hband(high, low, close)
-        out["donchian_low"] = ta.volatility.donchian_channel_lband(high, low, close)
+        fast = df["close"].ewm(span=12, adjust=False).mean()
+        slow = df["close"].ewm(span=26, adjust=False).mean()
+        macd = fast - slow
+        signal = macd.ewm(span=9, adjust=False).mean()
+        df["macd_hist"] = macd - signal
 
-        # Volume / flow
-        out["obv"] = ta.volume.on_balance_volume(close, volume)
-        out["cmf"] = ta.volume.chaikin_money_flow(high, low, close, volume)
-        out["mfi"] = ta.volume.money_flow_index(high, low, close, volume)
-        out["vwap"] = ta.volume.volume_weighted_average_price(high, low, close, volume)
-        out["adi"] = ta.volume.acc_dist_index(high, low, close, volume)
+        ma20 = df["close"].rolling(20).mean().bfill()
+        std20 = df["close"].rolling(20).std().bfill()
+        df["bb_width"] = ((ma20 + 2 * std20) - (ma20 - 2 * std20)) / ma20.replace(0, 1e-9)
 
-        # SuperTrend approximation + pivots/fib
-        hl2 = (high + low) / 2
-        out["supertrend_proxy"] = hl2 - (1.5 * out["atr"])
-        out["pivot"] = (high.shift(1) + low.shift(1) + close.shift(1)) / 3
-        out["pivot_r1"] = 2 * out["pivot"] - low.shift(1)
-        out["pivot_s1"] = 2 * out["pivot"] - high.shift(1)
-        swing_high = high.rolling(100).max()
-        swing_low = low.rolling(100).min()
-        out["fib_382"] = swing_low + 0.382 * (swing_high - swing_low)
-        out["fib_618"] = swing_low + 0.618 * (swing_high - swing_low)
+        tp = (df["high"] + df["low"] + df["close"]) / 3
+        df["vwap"] = (tp * df["volume"]).cumsum() / df["volume"].cumsum().replace(0, 1e-9)
 
-        # Liquidity & structure helpers
-        out["eq_highs"] = (high.round(2).rolling(10).apply(lambda s: len(set(s)) < 8, raw=False)).fillna(0)
-        out["eq_lows"] = (low.round(2).rolling(10).apply(lambda s: len(set(s)) < 8, raw=False)).fillna(0)
-        out["fvg_up"] = (low.shift(1) > high.shift(2)).astype(int)
-        out["fvg_down"] = (high.shift(1) < low.shift(2)).astype(int)
+        plus_dm = (df["high"].diff()).clip(lower=0)
+        minus_dm = (-df["low"].diff()).clip(lower=0)
+        plus_di = 100 * plus_dm.rolling(14).sum() / tr.rolling(14).sum().replace(0, 1e-9)
+        minus_di = 100 * minus_dm.rolling(14).sum() / tr.rolling(14).sum().replace(0, 1e-9)
+        dx = (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, 1e-9) * 100
+        df["adx"] = dx.rolling(14).mean().bfill()
 
-        out = out.dropna().reset_index(drop=True)
-        return out
+        # Simple fair value gap helpers
+        df["fvg_up"] = ((df["low"] > df["high"].shift(2)).astype(int)).fillna(0)
+        df["fvg_down"] = ((df["high"] < df["low"].shift(2)).astype(int)).fillna(0)
+
+        return df.bfill().ffill()

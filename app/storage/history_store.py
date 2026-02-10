@@ -44,28 +44,25 @@ class HistoryStore:
 
     def save_signal(self, signal: Signal, meta: dict[str, Any] | None = None) -> None:
         payload = asdict(signal)
-        payload["created_at"] = signal.created_at.isoformat()
         meta_json = json.dumps(meta or {}, ensure_ascii=False)
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO signal_history (
-                    created_at, symbol, direction, entry, stop_loss,
-                    tp1, tp2, tp3, rr, confidence, why, meta_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO signal_history (created_at,symbol,direction,entry,stop_loss,tp1,tp2,tp3,rr,confidence,why,meta_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
-                    payload["created_at"],
-                    signal.symbol,
-                    signal.direction,
-                    signal.entry,
-                    signal.stop_loss,
-                    signal.tp1,
-                    signal.tp2,
-                    signal.tp3,
-                    signal.rr,
-                    signal.confidence,
-                    signal.why,
+                    signal.created_at.isoformat(),
+                    payload["symbol"],
+                    payload["direction"],
+                    payload["entry"],
+                    payload["stop_loss"],
+                    payload["tp1"],
+                    payload["tp2"],
+                    payload["tp3"],
+                    payload["rr"],
+                    payload["confidence"],
+                    payload["why"],
                     meta_json,
                 ),
             )
@@ -82,32 +79,32 @@ class HistoryStore:
         with self._conn() as conn:
             rows = conn.execute(query, params).fetchall()
 
-        result = []
-        for r in rows:
-            result.append(
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            items.append(
                 {
-                    "created_at": r[0],
-                    "symbol": r[1],
-                    "direction": r[2],
-                    "entry": r[3],
-                    "stop_loss": r[4],
-                    "tp1": r[5],
-                    "tp2": r[6],
-                    "tp3": r[7],
-                    "rr": r[8],
-                    "confidence": r[9],
-                    "why": r[10],
-                    "meta": json.loads(r[11] or "{}"),
+                    "created_at": row[0],
+                    "symbol": row[1],
+                    "direction": row[2],
+                    "entry": row[3],
+                    "stop_loss": row[4],
+                    "tp1": row[5],
+                    "tp2": row[6],
+                    "tp3": row[7],
+                    "rr": row[8],
+                    "confidence": row[9],
+                    "why": row[10],
+                    "meta": json.loads(row[11] or "{}"),
                 }
             )
-        return result
+        return items
 
     def stats(self) -> dict[str, float]:
         with self._conn() as conn:
             total = conn.execute("SELECT COUNT(*) FROM signal_history").fetchone()[0]
             avg_conf = conn.execute("SELECT COALESCE(AVG(confidence),0) FROM signal_history").fetchone()[0]
-            last_day = conn.execute(
+            last_24 = conn.execute(
                 "SELECT COUNT(*) FROM signal_history WHERE created_at >= ?",
                 ((datetime.utcnow() - timedelta(days=1)).isoformat(),),
             ).fetchone()[0]
-        return {"total_signals": float(total), "avg_confidence": float(avg_conf), "signals_last_24h": float(last_day)}
+        return {"total_signals": float(total), "avg_confidence": float(avg_conf), "signals_last_24h": float(last_24)}

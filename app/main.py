@@ -34,8 +34,8 @@ events = EventService()
 market = MarketDataService()
 indicators = IndicatorEngine()
 signal_engine = SignalEngine()
-scanner = ScannerService(history=history, events=events)
 backtester = Backtester()
+scanner = ScannerService(history=history, events=events)
 scanner_task: asyncio.Task | None = None
 
 
@@ -109,11 +109,11 @@ async def manual_advisor(payload: dict) -> dict:
 
 @app.get("/api/snapshot")
 async def snapshot(symbol: str = Query(default="BTCUSDT"), timeframe: str = Query(default="15")) -> dict:
-    data = build_snapshot(symbol, timeframe)
+    snap = build_snapshot(symbol, timeframe)
     return {
         "ok": True,
         "symbol": symbol,
-        "snapshot": data,
+        "snapshot": snap,
         "history": history.fetch_signals(symbol=symbol, limit=50),
         "stats": history.stats(),
     }
@@ -130,8 +130,7 @@ async def export_history_csv(symbol: str | None = None, limit: int = 500) -> Pla
     headers = ["created_at", "symbol", "direction", "entry", "stop_loss", "tp1", "tp2", "tp3", "rr", "confidence", "why"]
     lines = [",".join(headers)]
     for row in rows:
-        values = [str(row[h]).replace("\n", " ").replace(",", ";") for h in headers]
-        lines.append(",".join(values))
+        lines.append(",".join([str(row[h]).replace("\n", " ").replace(",", ";") for h in headers]))
     return PlainTextResponse("\n".join(lines), media_type="text/csv")
 
 
@@ -144,7 +143,7 @@ async def recent_events(limit: int = 100, event_type: str | None = None) -> dict
 async def run_backtest(payload: dict) -> dict:
     symbol = payload.get("symbol", "BTCUSDT")
     timeframe = payload.get("timeframe", settings.default_timeframe)
-    candles = market.fetch_candles(symbol, timeframe, 700)
+    candles = market.fetch_candles(symbol, timeframe, 800)
     result = backtester.run(symbol=symbol, candles=candles)
     events.publish("backtest", result)
     return result
@@ -181,7 +180,13 @@ async def websocket_feed(ws: WebSocket) -> None:
     await ws.accept()
     try:
         while True:
-            await ws.send_json({"type": "state", "symbols": list(scanner.latest.keys()), "updated_at": datetime.now(timezone.utc).isoformat()})
+            await ws.send_json(
+                {
+                    "type": "state",
+                    "symbols": list(scanner.latest.keys()),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             await asyncio.sleep(settings.dashboard_poll_sec)
     except Exception:
         await ws.close()

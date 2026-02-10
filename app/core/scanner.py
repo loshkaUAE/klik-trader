@@ -30,13 +30,6 @@ class ScannerService:
                     candles = self.market.fetch_candles(symbol, settings.default_timeframe, 300)
                     frame = self.indicators.calculate(candles)
                     last = frame.iloc[-1]
-                    orderbook = self.market.fetch_orderbook(symbol)
-                    liquidity = {
-                        "swing_high": float(frame["high"].tail(50).max()),
-                        "swing_low": float(frame["low"].tail(50).min()),
-                        "fvg_up": bool(last["fvg_up"] > 0),
-                        "fvg_down": bool(last["fvg_down"] > 0),
-                    }
                     signal = self.signal_engine.evaluate(symbol, frame)
 
                     self.latest[symbol] = {
@@ -45,8 +38,13 @@ class ScannerService:
                         "timestamp": last["timestamp"].isoformat(),
                         "price": float(last["close"]),
                         "bias": "bullish" if last["ema_21"] > last["ema_200"] else "bearish",
-                        "orderbook": orderbook,
-                        "liquidity": liquidity,
+                        "orderbook": self.market.fetch_orderbook(symbol),
+                        "liquidity": {
+                            "swing_high": float(frame["high"].tail(50).max()),
+                            "swing_low": float(frame["low"].tail(50).min()),
+                            "fvg_up": bool(last["fvg_up"] > 0),
+                            "fvg_down": bool(last["fvg_down"] > 0),
+                        },
                         "indicators": {
                             "rsi": float(last["rsi"]),
                             "adx": float(last["adx"]),
@@ -55,15 +53,19 @@ class ScannerService:
                             "bb_width": float(last["bb_width"]),
                             "vwap": float(last["vwap"]),
                         },
-                        "candles": candles.tail(200).to_dict(orient="records"),
+                        "candles": candles.tail(220).to_dict(orient="records"),
                         "signal": asdict(signal) if signal else None,
                     }
 
-                    if signal:
-                        self.history.save_signal(signal, meta={"timeframe": settings.default_timeframe, "source": "scanner"})
-                        self.events.publish("signal", {"symbol": signal.symbol, "direction": signal.direction, "confidence": signal.confidence})
+                    if signal and signal.confidence >= settings.confidence_threshold:
+                        self.history.save_signal(signal, meta={"source": "scanner", "timeframe": settings.default_timeframe})
+                        self.events.publish(
+                            "signal",
+                            {"symbol": signal.symbol, "direction": signal.direction, "confidence": signal.confidence},
+                        )
             except Exception as exc:
                 self.events.publish("error", {"message": str(exc)})
+
             await asyncio.sleep(settings.scan_interval_sec)
 
     def stop(self) -> None:

@@ -11,12 +11,13 @@ class Settings(BaseSettings):
     bybit_api_key: str = ""
     bybit_api_secret: str = ""
     bybit_testnet: bool = True
+
     confidence_threshold: float = 90.0
     risk_per_trade_pct: float = 0.5
     max_open_positions: int = 3
     scan_interval_sec: int = 20
-    history_db_path: str = "data/trading_history.db"
     dashboard_poll_sec: int = 8
+    history_db_path: str = "data/trading_history.db"
 
 
 settings = Settings()

@@ -13,11 +13,11 @@ class Backtester:
 
     def run(self, symbol: str, candles: pd.DataFrame) -> dict:
         df = self.indicators.calculate(candles)
-        trades, equity = 0, 100.0
+        trades = 0
+        equity = 100.0
         for i in range(220, len(df)):
-            window = df.iloc[: i + 1]
-            sig = self.engine.evaluate(symbol, window)
+            sig = self.engine.evaluate(symbol, df.iloc[: i + 1])
             if sig:
                 trades += 1
-                equity += 0.8  # placeholder deterministic assumption
+                equity += 0.8
         return {"symbol": symbol, "trades": trades, "ending_equity": round(equity, 2)}

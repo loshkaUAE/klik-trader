@@ -6,8 +6,6 @@ from typing import Any
 
 
 class EventService:
-    """In-memory event stream used instead of external chat bots."""
-
     def __init__(self, max_events: int = 500) -> None:
         self._events: deque[dict[str, Any]] = deque(maxlen=max_events)
 
@@ -21,7 +19,7 @@ class EventService:
         )
 
     def recent(self, limit: int = 100, event_type: str | None = None) -> list[dict[str, Any]]:
-        items = list(self._events)
+        events = list(self._events)
         if event_type:
-            items = [e for e in items if e["type"] == event_type]
-        return items[:limit]
+            events = [x for x in events if x["type"] == event_type]
+        return events[:limit]
