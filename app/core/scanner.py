@@ -4,20 +4,20 @@ import asyncio
 from dataclasses import asdict
 
 from app.config import settings
+from app.core.events import EventService
 from app.data.market_data import MarketDataService
 from app.indicators.engine import IndicatorEngine
 from app.storage.history_store import HistoryStore
 from app.strategy.signal_engine import SignalEngine
-from app.notifier.bot import TelegramNotifier
 
 
 class ScannerService:
-    def __init__(self, notifier: TelegramNotifier, history: HistoryStore) -> None:
+    def __init__(self, history: HistoryStore, events: EventService) -> None:
         self.market = MarketDataService()
         self.indicators = IndicatorEngine()
         self.signal_engine = SignalEngine()
-        self.notifier = notifier
         self.history = history
+        self.events = events
         self.running = False
         self.latest: dict[str, dict] = {}
 
@@ -61,9 +61,9 @@ class ScannerService:
 
                     if signal:
                         self.history.save_signal(signal, meta={"timeframe": settings.default_timeframe, "source": "scanner"})
-                        await self.notifier.send_signal(signal)
+                        self.events.publish("signal", {"symbol": signal.symbol, "direction": signal.direction, "confidence": signal.confidence})
             except Exception as exc:
-                await self.notifier.send_event(f"Scanner error: {exc}")
+                self.events.publish("error", {"message": str(exc)})
             await asyncio.sleep(settings.scan_interval_sec)
 
     def stop(self) -> None:

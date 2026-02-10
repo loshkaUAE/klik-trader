@@ -1,31 +1,16 @@
 # Klik Trader Pro
 
-Профессиональная система: **Trade Advisor + Signal Engine + Telegram Bot Host + Web Dashboard**.
+Профессиональная система: **Trade Advisor + Signal Engine + Web Dashboard** (без Telegram-бота).
 
-## Что сделано по вашему запросу
+## Что изменено
 
-- График строится на данных Bybit (по API ключам), с fallback на synthetic данные для демо.
-- Красивый UI (тёмная тема, карточки, свечной Plotly-график).
-- Показ стакана (bids/asks), spread, imbalance и зон ликвидности.
-- Свечные бары на графике + простое распознавание паттернов (Doji/Hammer/Shooting Star).
-- При сигнале **90%+** на графике рисуется стрелка вверх/вниз.
-- История сигналов сохраняется в **SQLite** (`data/trading_history.db`).
-- Telegram bot host (python-telegram-bot v20.3):
-  - пуш сигналов,
-  - команда `/status`,
-  - команда `/signals`.
-- Запуск 24/7 через systemd на VPS.
-
-## Архитектура
-
-- `app/data/*` — Bybit candles + orderbook.
-- `app/indicators/engine.py` — 30+ индикаторов.
-- `app/strategy/*` — market structure + confidence engine.
-- `app/risk/risk_engine.py` — ATR/liquidity SL/TP.
-- `app/storage/history_store.py` — хранение истории в SQLite.
-- `app/notifier/bot.py` — Telegram уведомления + bot host команды.
-- `app/main.py` — FastAPI dashboard API + scanner lifecycle.
-- `app/static/*`, `app/templates/*` — фронт с candlestick chart + стрелки сигналов.
+- Убран Telegram-бот и связанные зависимости.
+- Добавлен внутренний Event Center (`/api/events`) для сигналов, ошибок и системных событий.
+- Добавлен API для запуска бэктеста (`POST /api/backtest/run`).
+- Добавлены API управления сканером (`POST /api/scanner/pause`, `POST /api/scanner/resume`, `GET /api/scanner/status`).
+- Добавлен экспорт истории сигналов в CSV (`GET /api/history/export`).
+- На дашборд добавлены кнопки: pause/resume scanner, запуск backtest и export CSV, плюс лента system events.
+- Сохранились: Bybit свечи, стакан, ликвидность, 90%+ стрелки на графике, история сигналов в SQLite.
 
 ## .env
 
@@ -41,10 +26,6 @@ HISTORY_DB_PATH=data/trading_history.db
 BYBIT_API_KEY=...
 BYBIT_API_SECRET=...
 BYBIT_TESTNET=true
-
-TELEGRAM_TOKEN=...
-TELEGRAM_CHAT_ID=...
-TELEGRAM_ADMIN_USER_ID=
 ```
 
 ## Локальный запуск
@@ -60,6 +41,26 @@ python app/main.py
 
 Открыть: `http://localhost:8000`
 
+## Как внести изменения через Pull Request на GitHub
+
+1. Создать ветку:
+   ```bash
+   git checkout -b feature/my-change
+   ```
+2. Внести правки и проверить локально.
+3. Закоммитить:
+   ```bash
+   git add .
+   git commit -m "Describe your change"
+   ```
+4. Запушить ветку:
+   ```bash
+   git push -u origin feature/my-change
+   ```
+5. На GitHub открыть репозиторий → **Compare & pull request**.
+6. Заполнить title/description, проверить diff и нажать **Create pull request**.
+7. После review — **Squash and merge** (или обычный merge, по вашему процессу).
+
 ## VPS 24/7 (Ubuntu)
 
 ```bash
@@ -71,7 +72,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Создать `/etc/systemd/system/klik-trader.service`:
+`/etc/systemd/system/klik-trader.service`:
 
 ```ini
 [Unit]
@@ -83,8 +84,6 @@ User=ubuntu
 WorkingDirectory=/opt/klik-trader
 EnvironmentFile=/opt/klik-trader/.env
 ExecStart=/opt/klik-trader/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-# или
-python app/main.py
 Restart=always
 RestartSec=5
 
@@ -99,4 +98,13 @@ sudo systemctl start klik-trader
 sudo systemctl status klik-trader
 ```
 
-Теперь сканер и Telegram bot host работают непрерывно, а история сигналов сохраняется между рестартами.
+## API (основное)
+
+- `GET /api/snapshot?symbol=BTCUSDT&timeframe=15` — снимок рынка для UI.
+- `POST /advisor` — ручной расчёт SL/TP/Confidence.
+- `GET /api/history` — история сигналов из SQLite.
+- `GET /api/history/export` — CSV-экспорт истории.
+- `GET /api/events` — внутренние системные события (signal/error/backtest/system).
+- `POST /api/backtest/run` — быстрый бэктест по символу/таймфрейму.
+- `POST /api/scanner/pause` / `POST /api/scanner/resume` — управление сканером.
+- `GET /api/scanner/status` — статус фонового сканера.

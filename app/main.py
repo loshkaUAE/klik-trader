@@ -10,18 +10,19 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from fastapi import FastAPI, Query, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.advisor.manual_advisor import TradeAdvisor
+from app.backtest.backtester import Backtester
 from app.config import settings
+from app.core.events import EventService
 from app.core.scanner import ScannerService
 from app.data.market_data import MarketDataService
 from app.indicators.engine import IndicatorEngine
 from app.storage.history_store import HistoryStore
 from app.strategy.signal_engine import SignalEngine
-from app.notifier.bot import TelegramNotifier
 
 app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -29,21 +30,12 @@ templates = Jinja2Templates(directory="app/templates")
 
 advisor = TradeAdvisor()
 history = HistoryStore()
+events = EventService()
 market = MarketDataService()
 indicators = IndicatorEngine()
 signal_engine = SignalEngine()
-
-notifier = TelegramNotifier(
-    status_provider=lambda: {
-        "mode": settings.mode,
-        "symbols": settings.default_symbols,
-        "threshold": settings.confidence_threshold,
-        "scan_interval_sec": settings.scan_interval_sec,
-        "total_signals": history.stats()["total_signals"],
-    },
-    latest_signals_provider=lambda: history.fetch_signals(limit=5),
-)
-scanner = ScannerService(notifier=notifier, history=history)
+scanner = ScannerService(history=history, events=events)
+backtester = Backtester()
 scanner_task: asyncio.Task | None = None
 
 
@@ -81,7 +73,6 @@ def build_snapshot(symbol: str, timeframe: str) -> dict:
 @app.on_event("startup")
 async def startup_event() -> None:
     global scanner_task
-    await notifier.start_bot_host()
     scanner_task = asyncio.create_task(scanner.run_forever())
 
 
@@ -90,7 +81,6 @@ async def shutdown_event() -> None:
     scanner.stop()
     if scanner_task:
         scanner_task.cancel()
-    await notifier.stop_bot_host()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -132,6 +122,53 @@ async def snapshot(symbol: str = Query(default="BTCUSDT"), timeframe: str = Quer
 @app.get("/api/history")
 async def signal_history(symbol: str | None = None, limit: int = 100) -> dict:
     return {"items": history.fetch_signals(symbol=symbol, limit=limit)}
+
+
+@app.get("/api/history/export", response_class=PlainTextResponse)
+async def export_history_csv(symbol: str | None = None, limit: int = 500) -> PlainTextResponse:
+    rows = history.fetch_signals(symbol=symbol, limit=limit)
+    headers = ["created_at", "symbol", "direction", "entry", "stop_loss", "tp1", "tp2", "tp3", "rr", "confidence", "why"]
+    lines = [",".join(headers)]
+    for row in rows:
+        values = [str(row[h]).replace("\n", " ").replace(",", ";") for h in headers]
+        lines.append(",".join(values))
+    return PlainTextResponse("\n".join(lines), media_type="text/csv")
+
+
+@app.get("/api/events")
+async def recent_events(limit: int = 100, event_type: str | None = None) -> dict:
+    return {"items": events.recent(limit=limit, event_type=event_type)}
+
+
+@app.post("/api/backtest/run")
+async def run_backtest(payload: dict) -> dict:
+    symbol = payload.get("symbol", "BTCUSDT")
+    timeframe = payload.get("timeframe", settings.default_timeframe)
+    candles = market.fetch_candles(symbol, timeframe, 700)
+    result = backtester.run(symbol=symbol, candles=candles)
+    events.publish("backtest", result)
+    return result
+
+
+@app.post("/api/scanner/pause")
+async def pause_scanner() -> dict:
+    scanner.stop()
+    events.publish("system", {"action": "scanner_paused"})
+    return {"ok": True}
+
+
+@app.post("/api/scanner/resume")
+async def resume_scanner() -> dict:
+    global scanner_task
+    if scanner_task is None or scanner_task.done():
+        scanner_task = asyncio.create_task(scanner.run_forever())
+    events.publish("system", {"action": "scanner_resumed"})
+    return {"ok": True}
+
+
+@app.get("/api/scanner/status")
+async def scanner_status() -> dict:
+    return {"running": scanner.running, "tracked_symbols": list(scanner.latest.keys())}
 
 
 @app.get("/health")

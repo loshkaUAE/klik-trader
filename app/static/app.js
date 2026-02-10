@@ -7,6 +7,8 @@ const bidsEl = document.getElementById('bids');
 const asksEl = document.getElementById('asks');
 const historyEl = document.getElementById('history');
 const statsEl = document.getElementById('stats');
+const eventsEl = document.getElementById('events');
+const scannerStateEl = document.getElementById('scannerState');
 
 function candlePattern(c) {
   const body = Math.abs(c.close - c.open);
@@ -92,10 +94,27 @@ async function load() {
   render(data.snapshot, data.history, data.stats);
 }
 
+async function loadEvents() {
+  const [eventsRes, statusRes] = await Promise.all([
+    fetch('/api/events?limit=25'),
+    fetch('/api/scanner/status')
+  ]);
+  const eventsData = await eventsRes.json();
+  const statusData = await statusRes.json();
+  scannerStateEl.innerHTML = `Scanner: <b>${statusData.running ? 'running' : 'paused'}</b> | Symbols: <b>${(statusData.tracked_symbols || []).join(', ') || '-'}</b>`;
+  eventsEl.innerHTML = (eventsData.items || []).map(e =>
+    `<li>${e.ts} | <b>${e.type}</b> | ${JSON.stringify(e.payload)}</li>`
+  ).join('');
+}
+
 symbolSelect.addEventListener('change', load);
 timeframeSelect.addEventListener('change', load);
-setInterval(load, (window.APP_CONFIG?.pollSec || 8) * 1000);
+setInterval(() => {
+  load();
+  loadEvents();
+}, (window.APP_CONFIG?.pollSec || 8) * 1000);
 load();
+loadEvents();
 
 const form = document.getElementById('advisorForm');
 form.addEventListener('submit', async (e) => {
@@ -105,4 +124,30 @@ form.addEventListener('submit', async (e) => {
   const res = await fetch('/advisor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
   document.getElementById('advisorResult').textContent = JSON.stringify(data, null, 2);
+});
+
+document.getElementById('pauseScannerBtn').addEventListener('click', async () => {
+  await fetch('/api/scanner/pause', { method: 'POST' });
+  await loadEvents();
+});
+
+document.getElementById('resumeScannerBtn').addEventListener('click', async () => {
+  await fetch('/api/scanner/resume', { method: 'POST' });
+  await loadEvents();
+});
+
+document.getElementById('runBacktestBtn').addEventListener('click', async () => {
+  const payload = { symbol: symbolSelect.value, timeframe: timeframeSelect.value };
+  const res = await fetch('/api/backtest/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const result = await res.json();
+  eventsEl.insertAdjacentHTML('afterbegin', `<li><b>backtest_result</b> | ${JSON.stringify(result)}</li>`);
+});
+
+document.getElementById('exportHistoryBtn').addEventListener('click', () => {
+  const symbol = symbolSelect.value;
+  window.open(`/api/history/export?symbol=${encodeURIComponent(symbol)}&limit=500`, '_blank');
 });

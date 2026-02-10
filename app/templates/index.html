@@ -23,6 +23,10 @@
           <option>1</option><option>5</option><option selected>15</option><option>60</option><option>240</option><option>D</option>
         </select>
       </label>
+      <button id="pauseScannerBtn" type="button">Pause scanner</button>
+      <button id="resumeScannerBtn" type="button">Resume scanner</button>
+      <button id="runBacktestBtn" type="button">Run backtest</button>
+      <button id="exportHistoryBtn" type="button">Export CSV</button>
     </div>
   </div>
 
@@ -64,6 +68,12 @@
       <h2>История сигналов</h2>
       <div id="stats"></div>
       <ul id="history"></ul>
+    </section>
+
+    <section class="card">
+      <h2>System events</h2>
+      <div id="scannerState"></div>
+      <ul id="events"></ul>
     </section>
   </div>
 

@@ -11,9 +11,6 @@ class Settings(BaseSettings):
     bybit_api_key: str = ""
     bybit_api_secret: str = ""
     bybit_testnet: bool = True
-    telegram_token: str = ""
-    telegram_chat_id: str = ""
-    telegram_admin_user_id: str = ""
     confidence_threshold: float = 90.0
     risk_per_trade_pct: float = 0.5
     max_open_positions: int = 3
